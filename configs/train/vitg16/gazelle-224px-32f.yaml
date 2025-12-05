@@ -1,0 +1,129 @@
+app: vjepa_droid
+cpus_per_task: 12
+folder: /data3/lg2/human_wm/V-jepa2-heatmap/logs/ego4d-heatmap-online
+mem_per_gpu: 220G
+nodes: 4
+tasks_per_node: 8
+
+data:
+  condition_mode: gazelle
+  batch_size: 1
+  crop_size: 224
+  datasets:
+    - /data3/lg2/human_wm/Ego4d/test/output2.txt
+  dataset_fpcs:
+    - 16
+  fps: 8
+  num_workers: 12
+  patch_size: 16
+  pin_mem: true
+  tubelet_size: 2
+  deterministic_sampling: true  # Enable fixed sampling for token caching
+  gazelle:
+    checkpoint: /data3/lg2/human_wm/gazelle/checkpoints/gazelle_dinov2_vitb14_inout.pt
+    model_name: gazelle_dinov2_vitb14_inout
+    device: cuda  # Using GPU now that Gazelle is in model (not DataLoader worker)
+    batch_size: 8  # Increased for better GPU utilization
+    python_path: /data3/lg2/human_wm/gazelle
+    min_cuda_free_mb: 2048  # Reduced requirement since we have 20GB free
+  val:
+    condition_mode: gazelle
+    batch_size: 1
+    num_workers: 0
+    pin_mem: true
+    persistent_workers: false
+    fps: 8
+    tubelet_size: 2
+    deterministic_sampling: true  # Enable fixed sampling for token caching
+    dataset_fpcs:
+      - 16
+    datasets:
+      - /data3/lg2/human_wm/Ego4d/test/output2.txt
+    gazelle:
+      checkpoint: /data3/lg2/human_wm/gazelle/checkpoints/gazelle_dinov2_vitb14_inout.pt
+      model_name: gazelle_dinov2_vitb14_inout
+      device: cuda  # Using GPU now that Gazelle is in model (not DataLoader worker)
+      batch_size: 8  # Increased for better GPU utilization
+      python_path: /data3/lg2/human_wm/gazelle
+      min_cuda_free_mb: 2048  # Reduced requirement since we have 20GB free
+    data_aug:
+      auto_augment: false
+      horizontal_flip: false
+      motion_shift: false
+      random_resize_aspect_ratio:
+        - 1.0
+        - 1.0
+      random_resize_scale:
+        - 1.0
+        - 1.0
+      reprob: 0.0
+
+data_aug:
+  auto_augment: false
+  horizontal_flip: false
+  motion_shift: false
+  random_resize_aspect_ratio:
+    - 0.75
+    - 1.35
+  random_resize_scale:
+    - 0.5
+    - 1.0
+  reprob: 0.0
+
+loss:
+  auto_steps: 1
+  loss_exp: 1.0
+  normalize_reps: true
+
+meta:
+  dtype: float16
+  eval_freq: 1
+  resume_checkpoint: null
+  load_predictor: false
+  # pretrain_checkpoint: null
+  pretrain_checkpoint: /data3/lg2/human_wm/V-jepa2-heatmap/features/vitl.pt
+  context_encoder_key: target_encoder
+  target_encoder_key: target_encoder
+  save_every_freq: 3
+  seed: 239
+  use_sdpa: true
+  wandb:
+    enable: true
+    project: vjepa2-heatmap
+    entity:
+    name: heatmap-online-debug
+    group: online
+    tags:
+      - heatmap
+      - online
+    notes: "Small-scale heatmap training on all videos"
+
+model:
+  condition_mode: gazelle
+  model_name: vit_large
+  pred_depth: 12
+  pred_embed_dim: 384
+  pred_is_frame_causal: true
+  pred_num_heads: 12
+  uniform_power: true
+  use_activation_checkpointing: true
+  use_rope: true
+  use_silu: false
+  use_pred_silu: false
+  wide_silu: true
+  heatmap:
+    heatmap_patch_size: 16
+    scene_token_dim: 256
+    scene_token_grid: 32
+
+optimization:
+  anneal: 5
+  epochs: 100
+  final_lr: 0.0
+  final_weight_decay: 0.04
+  ipe:
+  lr: 0.0002
+  start_lr: 0.00005
+  warmup: 5
+  weight_decay: 0.04
+

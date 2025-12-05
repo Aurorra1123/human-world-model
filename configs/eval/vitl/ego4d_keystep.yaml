@@ -1,0 +1,45 @@
+eval_name: action_anticipation_frozen
+
+# Wandb configuration (optional)
+use_wandb: true  # Set to true to enable wandb logging
+wandb_project: vjepa-action-anticipation  # Wandb project name
+wandb_name: ego4d-keystep-vitl  # Run name (defaults to tag if not specified)
+
+experiment:
+  classifier:
+    num_heads: 8
+    num_probe_blocks: 2
+  data:
+    dataset: EGO4D_KEYSTEP
+    base_path: /data3/lg2/human_wm/Ego4d/exo_data/takes
+    dataset_train: /data3/lg2/human_wm/Ego4d/test/annotations/keystep_train.json
+    dataset_val: /data3/lg2/human_wm/Ego4d/test/annotations/keystep_val.json
+    camera_glob: cam01*.mp4
+    frames_per_clip: 64
+    frames_per_second: 4
+    resolution: 256
+    random_resize_scale: [0.9, 1.0]
+    reprob: 0.0
+    train_anticipation_time_sec: [0.5, 2.0]
+    train_anticipation_point: [0.1, 0.1]
+    anticipation_time_sec: [0.5, 2.0]
+    val_anticipation_point: [0.0, 0.0]
+    num_workers: 12
+    pin_memory: true
+  optimization:
+    batch_size: 16
+    num_epochs: 1000
+    use_bfloat16: true
+    use_focal_loss: false
+    multihead_kwargs:
+      - {weight_decay: 0.04, final_weight_decay: 0.04, start_lr: 7.5e-5, lr: 4.25e-4, final_lr: 0.0, warmup: 15}
+model_kwargs:
+  checkpoint: /data3/lg2/human_wm/vjepa2/features/vitl.pt
+  module_name: evals.action_anticipation_frozen.modelcustom.vit_encoder_predictor_concat_ar
+  pretrain_kwargs:
+    encoder: {model_name: vit_large, checkpoint_key: encoder}
+    predictor: {model_name: vit_predictor, checkpoint_key: predictor, use_mask_tokens: true, num_mask_tokens: 10}
+  wrapper_kwargs: {num_output_frames: 2, num_steps: 1}
+tag: ego4d-keystep-vitl
+folder: /tmp/ego4d_keystep/
+
