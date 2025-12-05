@@ -1,450 +1,113 @@
-# V-JEPA 2: Self-Supervised Video Models Enable Understanding, Prediction and Planning
+## 基于 V-JEPA2 的 Human World Model（Gazelle 版）
 
-### [Meta FAIR](https://ai.meta.com/research/)
+![Human World Model 主图](assets/figure1.png)
 
-Mahmoud Assran∗, Adrien Bardes∗, David Fan∗, Quentin Garrido∗, Russell Howes∗, Mojtaba
-Komeili∗, Matthew Muckley∗, Ammar Rizvi∗, Claire Roberts∗, Koustuv Sinha∗, Artem Zholus*,
-Sergio Arnaud*, Abha Gejji*, Ada Martin*, Francois Robert Hogan*, Daniel Dugas*, Piotr
-Bojanowski, Vasil Khalidov, Patrick Labatut, Francisco Massa, Marc Szafraniec, Kapil
-Krishnakumar, Yong Li, Xiaodong Ma, Sarath Chandar, Franziska Meier*, Yann LeCun*, Michael
-Rabbat*, Nicolas Ballas*
+本项目在 Meta 官方的 `vjepa2` 仓库基础上，引入 **Gazelle 场景 token** 作为条件信号，对 V‑JEPA2 的 predictor 进行增强，得到一个更贴近人类注意/意图的 **Human World Model**。整体流程分为两步：
 
-*Core Team
+- **阶段一**：在 Ego4D/Ego-Exo4D 视频上，用 Gazelle 提取 per-frame 场景 token，在冻结的 V‑JEPA2 encoder/target encoder 上训练一个 **Gazelle‑conditioned predictor**。
+- **阶段二**：将该 Human World Model 作为冻结 backbone，在 `Ego4D KeyStep` 任务上只训练一个轻量的 **anticipation head**，评估其在动作预判上的增益。
 
-[[`Paper`](https://arxiv.org/abs/2506.09985)] [[`Blog`](https://ai.meta.com/blog/v-jepa-2-world-model-benchmarks)] [[`BibTex`](#Citation)]
+关于原始 V‑JEPA2 的安装、基础训练与通用评测流程，请参考上游仓库文档（如 `vjepa2/README.md` 与 `vjepa2/evals/action_anticipation_frozen/EGO4D_KEYSTEP_TRAINING.md`）。本说明仅补充与 Human World Model 相关的关键步骤与命令。
 
-Official Pytorch codebase for V-JEPA 2 and V-JEPA 2-AC.
+---
 
-V-JEPA 2 is a self-supervised approach to training video encoders, using internet-scale video data, that attains state-of-the-art performance on motion understanding and human action anticipation tasks. V-JEPA 2-AC is a latent action-conditioned world model post-trained from V-JEPA 2 (using a small amount of robot trajectory interaction data) that solves robot manipulation tasks without environment-specific data collection or task-specific training or calibration.
+### 环境与数据准备（简要）
 
-<p align="center">
-	<img src="assets/flowchart.png" width=100%>
-</p>
+- **依赖安装**：按 `vjepa2/README.md` 与 `V-jepa2-heatmap/README.md` 配置：
+  - PyTorch + CUDA
+  - `decord`、`wandb` 等基础依赖
+- **Gazelle 安装与配置**：
+  - clone Gazelle 仓库，并设置 `GAZELLE_REPO` 或在 yaml 里通过 `data.gazelle.python_path` 指向 Gazelle 根目录。
+  - 准备 Gazelle checkpoint，例如  
+    `gazelle/checkpoints/gazelle_dinov2_vitb14_inout.pt`。
+- **数据**：
+  - Ego4D / Ego-Exo4D 视频（供 Gazelle 预训练用），路径在 `V-jepa2-heatmap/configs/train/*.yaml` 中的 `data.datasets` 指定。
+  - Ego4D KeyStep 标注和视频（用于下游评估），路径在 `vjepa2/configs/eval/vitl/ego4d_keystep.yaml` 中配置。
 
-<!---
-## Updates
+---
 
-* **[Jun-6-25]:** V-JEPA 2 is released. [[`Blog`](https://ai.meta.com/blog/v-jepa-2-world-model-benchmarks)]
---->
+### 阶段一：用 Gazelle 预训练 Human World Model（训练 predictor）
 
-## V-JEPA 2 Pre-training
+这一阶段在 `V-jepa2-heatmap` 仓库中进行，通过 `app/main.py` + 训练配置 yaml 启动。示例配置为：
 
-**(Top)** The encoder and predictor are pre-trained through self-supervised learning from video using a masked latent feature prediction objective, leveraging abundant natural videos to bootstrap physical world understanding and prediction. **(Bottom)** Performance of V-JEPA 2 on downstream understanding and prediction tasks.
+- `V-jepa2-heatmap/configs/train/vitg16/heatmap-224px-32f.yaml`  
+ （其中 `data.condition_mode: gazelle` 且 `data.gazelle` 已配置好 Gazelle 参数）
 
-<img align="left" src="https://github.com/user-attachments/assets/914942d8-6a1e-409d-86ff-ff856b7346ab" width=65%>&nbsp;
-<table>
-  <tr>
-    <th colspan="1">Benchmark</th>
-    <th colspan="1">VJEPA 2</th>
-    <th colspan="1">Previous Best</th>
-  </tr>
-  <tr>
-    <td>EK100</td>
-    <td>39.7%</td>
-    <td>27.6% (PlausiVL)</td>
-  </tr>
-  <tr>
-    <td>SSv2 (Probe)</td>
-    <td>77.3%</td>
-    <td>69.7% (InternVideo2-1B)</td>
-  </tr>
-  <tr>
-    <td>Diving48 (Probe)</td>
-    <td>90.2%</td>
-    <td>86.4% (InternVideo2-1B)</td>
-  </tr>
-  <tr>
-    <td>MVP (Video QA)</td>
-    <td>44.5%</td>
-    <td>39.9% (InternVL-2.5)</td>
-  </tr>
-  <tr>
-    <td>TempCompass (Video QA)</td>
-    <td>76.9%</td>
-    <td>75.3% (Tarsier 2)</td>
-  </tr>
-</table>
+#### 训练命令示例
 
-## V-JEPA 2-AC Post-training
+```bash
+cd /data3/lg2/human_wm/V-jepa2-heatmap
 
-**(Top)** After post-training with a small amount of robot data, we can deploy the model on a robot arm in new environments, and tackle foundational tasks like reaching, grasping, and pick-and-place by planning from image goals. **(Bottom)** Performance on robot manipulation tasks using a Franka arm, with input provided through a monocular RGB camera.
-
-<img align="left" src="https://github.com/user-attachments/assets/c5d42221-0102-4216-911d-061a4369a805" width=65%>&nbsp;
-<table>
-  <tr>
-    <th colspan="1"></th>
-    <th colspan="1"></th>
-    <th colspan="2">Grasp</th>
-    <th colspan="2">Pick-and-Place</th>
-  </tr>
-  <tr>
-    <th colspan="1">Method</th>
-    <th colspan="1">Reach</th>
-    <th colspan="1">Cup</th>
-    <th colspan="1">Box</th>
-    <th colspan="1">Cup</th>
-    <th colspan="1">Box</th>
-  </tr>
-  <tr>
-    <td>Octo</td>
-    <td>100%</td>
-    <td>10%</td>
-    <td>0%</td>
-    <td>10%</td>
-    <td>10%</td>
-  </tr>
-  <tr>
-    <td>Cosmos</td>
-    <td>80%</td>
-    <td>0%</td>
-    <td>20%</td>
-    <td>0%</td>
-    <td>0%</td>
-  </tr>
-  <tr>
-    <td>VJEPA 2-AC</td>
-    <td>100%</td>
-    <td>60%</td>
-    <td>20%</td>
-    <td>80%</td>
-    <td>50%</td>
-  </tr>
-</table>
-
-## Models
-
-### V-JEPA 2
-
-#### HuggingFace
-
-See our [HuggingFace collection](https://huggingface.co/collections/facebook/v-jepa-2-6841bad8413014e185b497a6) for V-JEPA 2.
-
-#### Pretrained Checkpoints
-
-<table>
-  <tr>
-    <th colspan="1">Model</th>
-    <th colspan="1">#Parameters</th>
-    <th colspan="1">Resolution</th>
-    <th colspan="1">Download Link</th>
-    <th colspan="1">Pretraining Config</th>
-  </tr>
-  <tr>
-    <td>ViT-L/16</td>
-    <td>300M</td>
-    <td>256</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/vitl.pt">checkpoint</a></td>
-    <td><a href="configs/train/vitl16">configs</a></td>
-  </tr>
-  <tr>
-    <td>ViT-H/16</td>
-    <td>600M</td>
-    <td>256</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/vith.pt">checkpoint</a></td>
-    <td><a href="configs/train/vith16/">configs</a></td>
-  </tr>
-  <tr>
-    <td>ViT-g/16</td>
-    <td>1B</td>
-    <td>256</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/vitg.pt">checkpoint</a></td>
-    <td><a href="configs/train/vitg16">configs</a></td>
-  </tr>
-  <tr>
-    <td>ViT-g/16<sub>384</sub></td>
-    <td>1B</td>
-    <td>384</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/vitg-384.pt">checkpoint</a></td>
-    <td><a href="configs/train/vitg16">configs</a></td>
-  </tr>
-</table>
-
-#### Pretrained backbones (via PyTorch Hub)
-
-Please install [Pytorch](https://pytorch.org/get-started/locally/), [timm](https://pypi.org/project/timm/) and [einops](https://pypi.org/project/einops/) locally, then run the following to load each model. Installing Pytorch with CUDA support is strongly recommended.
-
-```python
-import torch
-
-# preprocessor
-processor = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_preprocessor')
-# models
-vjepa2_vit_large = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_vit_large')
-vjepa2_vit_huge = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_vit_huge')
-vjepa2_vit_giant = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_vit_giant')
-vjepa2_vit_giant_384 = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_vit_giant_384')
-
+python app/main.py \
+  --fname configs/train/vitg16/heatmap-224px-32f.yaml
 ```
 
-#### Pretrained checkpoints on Huggingface
+该命令会：
 
-You can also use our pretrained checkpoints on [Huggingface](https://huggingface.co/collections/facebook/v-jepa-2-6841bad8413014e185b497a6).
+- 加载预训练的 V‑JEPA2 encoder/target encoder（例如 `features/vitl.pt`）并冻结参数；
+- 使用 `GazelleSceneTokenDataset` 从 Ego4D 视频中采样 clip，得到：
+  - 给 encoder 的增强视频张量；
+  - 给 Gazelle 的 raw uint8 帧；
+- 通过 `GazelleSceneTokenExtractor` 在线提取每帧的 **scene tokens**，重采样到 ViT-L/16 的 patch grid，并线性映射为 latent gaze token；
+- 在 token 空间上训练 Gazelle‑conditioned predictor，使预测的 future tokens 逼近 target encoder 输出的目标 tokens。
 
-```python
-from transformers import AutoVideoProcessor, AutoModel
+训练完成后，会在配置文件中 `folder` 字段指定的目录（例如：
 
-hf_repo = "facebook/vjepa2-vitg-fpc64-256"
-# facebook/vjepa2-vitl-fpc64-256
-# facebook/vjepa2-vith-fpc64-256
-# facebook/vjepa2-vitg-fpc64-256
-# facebook/vjepa2-vitg-fpc64-384
-
-
-model = AutoModel.from_pretrained(hf_repo)
-processor = AutoVideoProcessor.from_pretrained(hf_repo)
+```text
+/data3/lg2/human_wm/V-jepa2-heatmap/logs/ego4d-heatmap-online
 ```
 
-#### Evaluation Attentive Probes
+）下生成：
 
-We share the trained attentive probes for two of our visual understanding evals (Something-Something v2 and Diving48) and the action anticipation eval EPIC-KITCHENS-100.
+- `latest.pt`：包含 **Human World Model**（冻结 encoder/target encoder + 训练好的 Gazelle‑conditioned predictor），以及优化器/调度器状态；
+- 以及按 `save_every_freq` 保存的中间 checkpoint（如 `e{epoch}.pt`）。
 
-<table>
-  <tr>
-    <th colspan="1">Model</th>
-    <th colspan="4">SSv2</th>
-    <th colspan="4">Diving48</th>
-    <th colspan="4">EK100</th>
-  </tr>
-  <tr>
-    <th colspan="1"></th>
-    <th colspan="1">Checkpoint</th>
-    <th colspan="1">Training Config</th>
-    <th colspan="1">Inference Config</th>
-    <th colspan="1">Result</th>
-    <th colspan="1">Checkpoint</th>
-    <th colspan="1">Training Config</th>
-    <th colspan="1">Inference Config</th>
-    <th colspan="1">Result</th>
-    <th colspan="1">Checkpoint</th>
-    <th colspan="1">Training Config</th>
-    <th colspan="1">Inference Config</th>
-    <th colspan="1">Result</th>
-  </tr>
-  <tr>
-    <td>ViT-L/16</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/ssv2-vitl-16x2x3.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitl/ssv2.yaml">config</a></td>
-    <td><a href="configs/inference/vitl/ssv2.yaml">config</a></td>
-    <td>73.7%</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/diving48-vitl-256.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitl/diving48.yaml">config</a></td>
-    <td><a href="configs/inference/vitl/diving48.yaml">config</a></td>
-    <td>89.0%</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/ek100-vitl-256.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitl/ek100.yaml">config</a></td>
-    <td><a href="configs/inference/vitl/ek100.yaml">config</a></td>
-    <td>32.7 R@5</td>
-  </tr>
-  <tr>
-    <td>ViT-g/16<sub>384</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/ssv2-vitg-384-64x2x3.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitg-384/ssv2.yaml">config</a></td>
-    <td><a href="configs/inference/vitg-384/ssv2.yaml">config</a></td>
-    <td>77.3%</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/diving48-vitg-384-32x4x3.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitg-384/diving48.yaml">config</a></td>
-    <td><a href="configs/inference/vitg-384/diving48.yaml">config</a></td>
-    <td>90.2%</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/ek100-vitg-384.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitg-384/ek100.yaml">config</a></td>
-    <td><a href="configs/inference/vitg-384/ek100.yaml">config</a></td>
-    <td>39.7 R@5</td>
-  </tr>
-</table>
+---
 
-### V-JEPA 2-AC
+### 阶段二：在 Ego4D KeyStep 上评估 Human World Model
 
-Our action-conditioned checkpoint was trained from the ViT-g encoder.
-<table>
-  <tr>
-    <th colspan="1">Model</th>
-    <th colspan="1">Download Link</th>
-    <th colspan="1">Training Config</th>
-  </tr>
-  <tr>
-    <td>ViT-g/16</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/vjepa2-ac-vitg.pt">checkpoint</a></td>
-    <td><a href="configs/train/vitg16/droid-256px-8f.yaml">config</a></td>
-  </tr>
-</table>
+下游评估在原始 `vjepa2` 仓库中进行，通过 `evals/main.py` 与 `configs/eval/vitl/ego4d_keystep.yaml` 完成。
 
-#### Pretrained action-conditioned backbone (via PyTorch Hub)
+在该阶段，**Human World Model 完全冻结**，只在其输出的 future tokens 上训练一个轻量的 anticipation head（`AttentivePooler + Linear`）。
 
-Please install [Pytorch](https://pytorch.org/get-started/locally/), [timm](https://pypi.org/project/timm/) and [einops](https://pypi.org/project/einops/) locally, then run the following to load each model. Installing Pytorch with CUDA support is strongly recommended.
+#### 评估命令示例
 
-```python
-import torch
+```bash
+cd /data3/lg2/human_wm/vjepa2
 
-vjepa2_encoder, vjepa2_ac_predictor = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_ac_vit_giant')
+python evals/main.py \
+  --fname configs/eval/vitl/ego4d_keystep.yaml \
+  --checkpoint /data3/lg2/human_wm/V-jepa2-heatmap/logs/ego4d-heatmap-online/latest.pt
 ```
 
+该命令会：
 
-See [energy_landscape_example.ipynb](notebooks/energy_landscape_example.ipynb) for an example notebook computing the energy landscape of the pretrained action-conditioned backbone using a robot trajectory collected from our lab.
-To run this notebook, you'll need to additionally install [Jupyter](https://jupyter.org/install) and [Scipy](https://scipy.org/install/) in your conda environment.
+- 在 `configs/eval/vitl/ego4d_keystep.yaml` 的基础上，使用 `--checkpoint` 指定的 `latest.pt` 覆盖 `model_kwargs.checkpoint`，将 Human World Model 作为 backbone；
+- 通过 `ego4d_keystep.py`：
+  - 使用 KeyStep JSON 标注构建 train/val 片段；
+  - 按指定的 anticipation 时间采样 clip，解码为 `(video, action, anticipation_time)`；
+  - 将 video clip 送入 **冻结的 Human World Model**（encoder + Gazelle‑conditioned predictor），得到对应未来帧的时空 token 表征；
+  - 通过 `AttentivePooler` 将 token 序列聚合为 clip-level 表征，并经线性分类头预测 key-step 类别；
+- 仅更新下游 head 的参数，评估 Human World Model 在 Ego4D KeyStep action anticipation 上的性能（Top‑1、mAP、mean class recall 等）。
 
+---
 
-## Getting Started
+### 关键代码位置（参考）
 
-### Setup
+- **预训练阶段（Human World Model）**
+  - `V-jepa2-heatmap/app/vjepa_droid/train.py`  
+    Human World Model 训练主循环，`condition_mode="gazelle"` 分支、Gazelle 条件的 `compute_losses` 等。
+  - `V-jepa2-heatmap/app/vjepa_droid/droid.py`  
+    `init_data(..., condition_type="gazelle")` 与 `GazelleSceneTokenDataset`。
+  - `V-jepa2-heatmap/app/vjepa_droid/gazelle_tokens.py`  
+    `GazelleSceneTokenExtractor` 封装及在线场景 token 提取。
+  - `V-jepa2-heatmap/src/models/gaze_ac_predictor.py`  
+    Gazelle‑conditioned predictor：对齐 Gazelle scene tokens 到 ViT patch grid，并作为残差条件注入 predictor。
 
-```
-conda create -n vjepa2-312 python=3.12
-conda activate vjepa2-312
-pip install .  # or `pip install -e .` for development mode
-```
+- **下游 Ego4D KeyStep 评估**
+  - `vjepa2/evals/action_anticipation_frozen/ego4d_keystep.py`  
+    KeyStep 数据切片、decode_videos_to_clips、以及使用 Human World Model 作为 backbone 的评估逻辑。
+  - `vjepa2/configs/eval/vitl/ego4d_keystep.yaml`  
+    Ego4D KeyStep 评估配置文件，包含数据路径、模型 checkpoint、训练超参等。
 
-**Note to macOS users:** V-JEPA 2 relies on [`decord`](https://github.com/dmlc/decord), which does not support macOS (and, unfortunately, is also no longer under development). In order to run the V-JEPA 2 code on macOS, you will need a different `decord` implementation. We do not make specific recommendations, although some users have reported the use of [`eva-decord`](https://github.com/georgia-tech-db/eva-decord) (see [PR 1](https://github.com/facebookresearch/vjepa2/pull/1)) or [`decord2`](https://github.com/johnnynunez/decord2) (see [PR 31](https://github.com/facebookresearch/vjepa2/pull/31)).  We leave the selection of the `decord` package up to the user's discretion.
-
-### Usage Demo
-
-See [vjepa2_demo.ipynb](notebooks/vjepa2_demo.ipynb) [(Colab Link)](https://colab.research.google.com/github/facebookresearch/vjepa2/blob/main/notebooks/vjepa2_demo.ipynb) or [vjepa2_demo.py](notebooks/vjepa2_demo.py) for an example of how to load both the HuggingFace and PyTorch V-JEPA 2 models and run inference on a sample video to get a sample classification result.
-
-The script assumes the presence of downloaded model checkpoints so you will need to download the model weights and update the corresponding paths in the script. E.g.:
-```
-wget https://dl.fbaipublicfiles.com/vjepa2/vitg-384.pt -P YOUR_DIR
-wget https://dl.fbaipublicfiles.com/vjepa2/evals/ssv2-vitg-384-64x2x3.pt -P YOUR_DIR
-
-# Then update your model paths in vjepa2_demo.py.
-pt_model_path = YOUR_DIR/vitg-384.pt
-classifier_model_path = YOUR_DIR/ssv2-vitg-384-64x2x3.pt
-
-# Then run the script (assumes your machine has a GPU)
-python -m notebooks.vjepa2_demo
-```
-
-### Probe-based evaluation
-
-Probe-based evaluation consists in training an attentive probe on top of frozen V-JEPA 2 features. We provide training scripts for training your own probes, and checkpoints to run inference directly.
-
-#### Training probes
-
-Evaluations can be run either locally, or distributed via SLURM. (Running locally is useful for debugging and validation).
-These sample commands launch Something-Something v2 video classification; other evals are launched by specifying the corresponding config.
-Use provided training configs under "Evaluation Attentive Probes". These configs allow to train multiple probes in parallel with various optimization parameters.
-Change filepaths as needed (e.g. `folder`, `checkpoint`, `dataset_train`, `dataset_val`) to match locations of data and downloaded checkpoints on your local filesystem.
-Change \# nodes and local batch size as needed to not exceed available GPU memory.
-
-##### Local
-
-To run locally, specify the GPUs to use on
-```
-python -m evals.main --fname configs/eval/vitl16/ssv2.yaml \
-  --devices cuda:0 cuda:1
-```
-
-##### Distributed
-
-```
-python -m evals.main_distributed \
-  --fname configs/eval/vitl/ssv2.yaml  \
-  --time 8600 \
-  --account my_account --qos=my_qos
-```
-
-#### Inference from existing probes
-
-Use provided inference configs under [Evaluation Attentive Probes](#evaluation-attentive-probes).
-Download the corresponding checkpoint, rename it to 'latest.pt', and create a folder with the checkpoint inside, with the format matching the variables in the config:
-```
-[folder]/[eval_name]/[tag]/latest.pt
-```
-Then run inference, locally or distributed, using the same evaluation commands as above, but with configs from `configs/inference`.
-
-### Pretraining
-
-Likewise, training can also be run locally or distributed. Pretraining and cooldown training phases are
-run with the same command using different configs.
-These sample commands launch initial training of a ViT-L model. Configs for cooldown (or action-conditioned) training
-can be found in the same directory as the config for initial training.
-
-#### Local
-
-```
-python -m app.main --fname configs/train/vitl16/pretrain-256px-16f.yaml \
-  --devices cuda:0
-```
-
-#### Distributed
-
-```
-python -m app.main_distributed \
-  --fname configs/train/vitl16/pretrain-256px-16f.yaml
-  --time 6000
-  --account my_account --qos=my_qos
-```
-
-### Postraining
-
-Post-training of the action-conditioned model, starting from the pretrained VJEPA 2 backbone, also follows a similar interface, and can be run locally or distributed using [this config](configs/train/vitg16/droid-256px-8f.yaml).
-We post-train the model starting from the ViT-g/16 backbone.
-
-#### Local
-
-```
-python -m app.main --fname configs/train/vitg16/droid-256px-8f.yaml \
-  --devices cuda:0
-```
-
-#### Distributed
-
-```
-python -m app.main_distributed \
-  --fname configs/train/vitg16/droid-256px-8f.yaml
-  --time 6000
-  --account my_account --qos=my_qos
-```
-
-
-## Code Structure
-
-```
-.
-├── app                              # training loops
-│   ├── vjepa                        #   video JEPA pre-training
-│   ├── vjepa_droid                  #   training the action-conditioned model
-│   ├── main_distributed.py          #   entrypoint for launch app on slurm cluster
-│   └── main.py                      #   entrypoint for launch app locally on your machine
-├── configs                          # config files with experiment params for training and evaluation
-│   ├── train                        #   pretraining (phase 1), cooldown (phase 2), and action-conditioned training
-│   └── eval                         #   frozen evaluations
-├── evals                            # evaluation loops training an attentive probe with frozen backbone...
-│   ├── action_anticipation_frozen   #   action anticipation
-│   ├── image_classification_frozen  #   image understanding
-│   ├── video_classification_frozen  #   video understanding
-│   ├── main_distributed.py          #   entrypoint for distributed evaluations
-│   └── main.py                      #   entrypoint for locally-run evaluations
-├── src                              # the package
-│   ├── datasets                     #   datasets, data loaders, ...
-│   ├── models                       #   model definitions
-│   ├── masks                        #   mask collators, masking utilities, ...
-│   └── utils                        #   shared utilities
-├── tests                            # unit tests for some modules in `src`
-
-```
-
-## License
-
-The majority of V-JEPA 2 is licensed under MIT, however portions of the project are available under separate license terms:
-
-[src/datasets/utils/video/randaugment.py](src/datasets/utils/video/randaugment.py)<br>
-[src/datasets/utils/video/randerase.py](src/datasets/utils/video/randerase.py)<br>
-[src/datasets/utils/worker_init_fn.py](src/datasets/utils/worker_init_fn.py)<br>
-
-are licensed under the Apache 2.0 license.
-
-
-## Citation
-If you find this repository useful in your research, please consider giving a star :star: and a citation
-```bibtex
-@article{assran2025vjepa2,
-  title={V-JEPA~2: Self-Supervised Video Models Enable Understanding, Prediction and Planning},
-  author={Assran, Mahmoud and Bardes, Adrien and Fan, David and Garrido, Quentin and Howes, Russell and
-Komeili, Mojtaba and Muckley, Matthew and Rizvi, Ammar and Roberts, Claire and Sinha, Koustuv and Zholus, Artem and
-Arnaud, Sergio and Gejji, Abha and Martin, Ada and Robert Hogan, Francois and Dugas, Daniel and
-Bojanowski, Piotr and Khalidov, Vasil and Labatut, Patrick and Massa, Francisco and Szafraniec, Marc and
-Krishnakumar, Kapil and Li, Yong and Ma, Xiaodong and Chandar, Sarath and Meier, Franziska and LeCun, Yann and
-Rabbat, Michael and Ballas, Nicolas},
-  journal={arXiv preprint arXiv:2506.09985},
-  year={2025}
-}
-```
+通过上述两个命令，即可从原始 V‑JEPA2 预训练权重出发，训练出带 Gazelle 条件的 Human World Model，并在 Ego4D KeyStep 动作预判任务上进行端到端评估。
